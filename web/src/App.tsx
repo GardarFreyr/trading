@@ -140,6 +140,28 @@ export default function App() {
       solUsd={s.data.solUsd}
       status={status}
     >
+      <section className="relative isolate shrink-0 overflow-hidden rounded-xl border bg-black" aria-label="Experiment summary">
+        <img
+          alt=""
+          className="absolute inset-0 -z-10 size-full object-cover object-[center_70%]"
+          decoding="async"
+          src="/banner.webp"
+        />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
+        <div className="flex min-h-36 flex-col justify-end gap-1 p-5 sm:min-h-48 sm:p-7">
+          <p className="text-xs font-medium tracking-wide text-white/60 uppercase">Simulated · paper trading only</p>
+          <h1 className="text-xl font-semibold text-white sm:text-2xl">Solana Paper Trader</h1>
+          {e ? (
+            <p className="num text-sm text-white/80">
+              <span className="text-lg font-semibold text-white sm:text-xl">{isk(e.equityIsk)}</span>
+              <span className={`ml-2 ${e.totalPnlIsk >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{pct((e.totalPnlIsk / e.initialIsk) * 100)}</span>
+              {countdown && <span className="ml-2 text-white/60">· {countdown.detail} · {countdown.label}</span>}
+            </p>
+          ) : (
+            <p className="text-sm text-white/70">Seven-day forward test with 10,000 simulated ISK</p>
+          )}
+        </div>
+      </section>
       {err && (
         <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm text-rose-500">
           Lost connection to engine: {err}. Showing last known state.
