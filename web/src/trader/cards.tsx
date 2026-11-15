@@ -1,9 +1,10 @@
-import { Fragment, useId, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { Fragment, useId, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Area, AreaChart, CartesianGrid, Line, XAxis, YAxis } from 'recharts';
 import {
   AlertTriangleIcon,
   ArrowDownRightIcon,
   ArrowUpRightIcon,
+  ChevronDownIcon,
   CircleDotIcon,
   InfoIcon,
   XCircleIcon,
@@ -12,19 +13,20 @@ import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Delta, DeltaIcon, DeltaValue } from '@/components/delta';
 import { StatusIndicator } from '@/components/indicator';
 import type { Feed, Position, State, Token, Trade } from '../types';
 import { ago, dateTime, duration, isk, pct, price, time, tone, usd } from '../format';
+import { SlidingTabs, SubtleNumber, TextsReveal } from './motion';
 
 const cardCls = 'shadow-none dark:ring-0';
 type Exp = NonNullable<State['experiment']>;
 
 // ---------- Stats (same anatomy as the block's DashboardStats) ----------
 
-export type Stat = { label: string; value: ReactNode; delta?: number; footnote: string; valueCls?: string };
+/** `n` is the number behind `value`; it sets which way changed digits move. */
+export type Stat = { label: string; value: string; n: number; delta?: number; footnote: string; valueCls?: string };
 
 export function StatCard({ s }: { s: Stat }) {
   return (
@@ -33,7 +35,9 @@ export function StatCard({ s }: { s: Stat }) {
         <CardTitle className="text-xs font-normal text-muted-foreground">{s.label}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        <p className={cn('text-2xl font-semibold tabular-nums', s.valueCls)}>{s.value}</p>
+        <p className={cn('text-2xl font-semibold tracking-tight tabular-nums', s.valueCls)}>
+          <SubtleNumber text={s.value} value={s.n} />
+        </p>
         <div className="flex items-center gap-1 text-xs">
           {s.delta != null && (
             <Delta value={s.delta}>
@@ -82,16 +86,17 @@ export function EquityCard({ e, className, ...props }: { e: Exp } & ComponentPro
           </div>
           <CardDescription>Simulated equity in ISK after all costs, against buying and holding SOL.</CardDescription>
         </div>
-        <Select onValueChange={(v) => setRange(v as Range)} value={range}>
-          <SelectTrigger aria-label="Performance time range" className="w-full min-w-36 sm:w-fit" size="sm">
-            <SelectValue placeholder="Range" />
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectItem value="24h">Last 24 hours</SelectItem>
-            <SelectItem value="72h">Last 3 days</SelectItem>
-            <SelectItem value="all">Whole experiment</SelectItem>
-          </SelectContent>
-        </Select>
+        <SlidingTabs
+          className="shrink-0 self-start sm:self-center"
+          label="Performance time range"
+          onChange={setRange}
+          options={[
+            { value: '24h', label: '24h' },
+            { value: '72h', label: '3 days' },
+            { value: 'all', label: 'All' },
+          ]}
+          value={range}
+        />
       </CardHeader>
       <CardContent>
         {rows.length < 2 ? (
@@ -172,7 +177,7 @@ function Meter({ label, value, max, display, barCls }: { label: string; value: n
         <span className="num">{display}</span>
       </div>
       <div className="h-1.5 rounded-full bg-muted">
-        <div className={cn('h-1.5 rounded-full', barCls)} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+        <div className={cn('t-meter-fill h-1.5 rounded-full', barCls)} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
       </div>
     </div>
   );
@@ -277,17 +282,21 @@ function PositionRow({ p, cfg, now }: { p: Position; cfg: State['config']; now: 
           </Delta>
           {!p.markFresh && <Badge variant="outline">stale price</Badge>}
         </div>
-        <span className={cn('num text-sm font-medium', tone(p.unrealizedIsk))}>{isk(p.unrealizedIsk, true)} net</span>
+        <span className={cn('num text-sm font-medium', tone(p.unrealizedIsk))}>
+          <SubtleNumber text={isk(p.unrealizedIsk, true)} value={p.unrealizedIsk ?? 0} /> net
+        </span>
       </div>
       <div className="num grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-4">
         <span>Cost {isk(p.costIsk)}</span>
-        <span>Value {isk(p.valueIsk)}</span>
+        <span>
+          Value <SubtleNumber text={isk(p.valueIsk)} value={p.valueIsk ?? 0} />
+        </span>
         <span>Entry {price(p.entryPriceSol)} SOL</span>
         <span>Held {duration(now - p.openedAt)}</span>
       </div>
       <div>
         <div className="relative h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-muted to-emerald-500/40">
-          <div className="absolute -top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-background bg-foreground" style={{ left: `${at * 100}%` }} />
+          <div className="t-marker absolute -top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-background bg-foreground" style={{ left: `${at * 100}%` }} />
         </div>
         <div className="num mt-1 flex justify-between text-[10px] text-muted-foreground">
           <span>SL −{sl * 100}%</span>
@@ -363,6 +372,9 @@ function eventIcon(level: string, message: string) {
 }
 
 export function ActivityCard({ s, now, className }: { s: State; now: number } & ComponentProps<typeof Card>) {
+  // Events already there on first render stay still; only later arrivals animate in.
+  const baseline = useRef<number | null>(null);
+  if (baseline.current == null) baseline.current = s.events[0]?.id ?? 0;
   return (
     <Card className={cn(cardCls, 'gap-0', className)}>
       <CardHeader className="border-b">
@@ -376,12 +388,24 @@ export function ActivityCard({ s, now, className }: { s: State; now: number } & 
               <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center [&_svg]:size-4">
                 {eventIcon(ev.level, ev.message)}
               </span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="line-clamp-2 text-xs leading-snug text-pretty text-foreground">{ev.message}</p>
-                <p className="num text-xs text-muted-foreground">
-                  {time(ev.ts)} · {ago(ev.ts, now)}
-                </p>
-              </div>
+              {ev.id > baseline.current! ? (
+                <TextsReveal
+                  className="min-w-0 flex-1 space-y-1"
+                  lines={[
+                    <p className="line-clamp-2 text-xs leading-snug text-pretty text-foreground">{ev.message}</p>,
+                    <p className="num text-xs text-muted-foreground">
+                      {time(ev.ts)} · {ago(ev.ts, now)}
+                    </p>,
+                  ]}
+                />
+              ) : (
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="line-clamp-2 text-xs leading-snug text-pretty text-foreground">{ev.message}</p>
+                  <p className="num text-xs text-muted-foreground">
+                    {time(ev.ts)} · {ago(ev.ts, now)}
+                  </p>
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -424,7 +448,18 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
                   const a = JSON.parse(t.assumptions);
                   return (
                     <Fragment key={t.id}>
-                      <TableRow className="h-14 cursor-pointer" onClick={() => setOpen(open === t.id ? null : t.id)}>
+                      <TableRow
+                        aria-expanded={open === t.id}
+                        className="h-14 cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
+                        onClick={() => setOpen(open === t.id ? null : t.id)}
+                        onKeyDown={(ev) => {
+                          if (ev.key === 'Enter' || ev.key === ' ') {
+                            ev.preventDefault();
+                            setOpen(open === t.id ? null : t.id);
+                          }
+                        }}
+                        tabIndex={0}
+                      >
                         <TableCell className="num pl-6 text-muted-foreground">{dateTime(t.ts)}</TableCell>
                         <TableCell className="font-medium">{t.symbol}</TableCell>
                         <TableCell>
@@ -437,14 +472,22 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
                           <span className="line-clamp-1 text-sm text-muted-foreground">{failed ? t.failReason : t.reason}</span>
                         </TableCell>
                         <TableCell className="pr-6 text-right">
-                          <Badge variant={failed ? 'destructive' : t.quoteSource === 'model' ? 'outline' : 'secondary'}>
-                            {failed ? 'Failed' : t.quoteSource === 'model' ? 'Filled (model)' : 'Filled'}
-                          </Badge>
+                          <span className={cn('t-acc inline-flex items-center gap-2')} data-open={open === t.id}>
+                            <Badge variant={failed ? 'destructive' : t.quoteSource === 'model' ? 'outline' : 'secondary'}>
+                              {failed ? 'Failed' : t.quoteSource === 'model' ? 'Filled (model)' : 'Filled'}
+                            </Badge>
+                            <span aria-hidden="true" className="t-acc-chevron text-muted-foreground">
+                              <ChevronDownIcon className="size-4" />
+                            </span>
+                          </span>
                         </TableCell>
                       </TableRow>
-                      {open === t.id && (
-                        <TableRow className="bg-muted/40 hover:bg-muted/40">
-                          <TableCell className="px-6 py-4 whitespace-normal" colSpan={8}>
+                      <TableRow className="t-acc-row hover:bg-transparent">
+                        <TableCell className="whitespace-normal" colSpan={8}>
+                          <div className="t-acc" data-open={open === t.id}>
+                            <div className="t-acc-panel">
+                              <div className="t-acc-panel-inner">
+                                <div className="border-b bg-muted/40 px-6 py-4">
                             <p className="mb-2 text-sm">{failed ? `Failed: ${t.failReason}` : t.reason}</p>
                             <div className="num grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-6 gap-y-1 text-xs text-muted-foreground">
                               <span>Quote: {t.quoteSource} ({t.route})</span>
@@ -461,9 +504,12 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
                                 </span>
                               )}
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     </Fragment>
                   );
                 })}

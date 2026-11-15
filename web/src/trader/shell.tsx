@@ -30,6 +30,7 @@ import { CustomSidebarTrigger } from '@/components/custom-sidebar-trigger';
 import { AppBreadcrumbs } from '@/components/app-breadcrumbs';
 import { StatusIndicator } from '@/components/indicator';
 import { cn } from '@/lib/utils';
+import { SoftText, SubtleNumber } from './motion';
 
 export const navGroups: SidebarNavGroup[] = [
   { items: [{ title: 'Overview', path: '#overview', icon: <LayoutGridIcon /> }] },
@@ -63,17 +64,20 @@ export function TraderShell({
   hasReport,
   canStart,
   onStart,
+  loading = false,
 }: {
   children: ReactNode;
   pathname: string;
   status: { label: string; tone: StatusTone };
   dataLive: boolean;
   solUsd: number | null;
-  countdown: { label: string; detail: string; progress: number } | null;
+  countdown: { label: string; detail: string; progress: number; msLeft: number } | null;
   experimentId: number | null;
   hasReport: boolean;
   canStart: boolean;
   onStart: () => void;
+  /** No state from the engine yet: hide controls that depend on it. */
+  loading?: boolean;
 }) {
   const active = navGroups.flatMap((g) => g.items).find((i) => i.path === pathname) ?? navGroups[0].items[0];
   return (
@@ -91,7 +95,7 @@ export function TraderShell({
             </SidebarMenuButton>
           </SidebarHeader>
           <SidebarContent>
-            {experimentId == null && (
+            {experimentId == null && !loading && (
               <SidebarGroup>
                 <SidebarMenu>
                   <SidebarMenuItem>
@@ -121,10 +125,12 @@ export function TraderShell({
                 )}
               >
                 <span className="font-mono text-[10px] text-muted-foreground">EXPERIMENT #{experimentId}</span>
-                <p className="num text-xs font-medium">{countdown.label}</p>
-                <span className="text-[10px] text-muted-foreground">{countdown.detail}</span>
+                <p className="num text-xs font-medium">
+                  <SubtleNumber text={countdown.label} value={countdown.msLeft} />
+                </p>
+                <SoftText className="text-[10px] text-muted-foreground" text={countdown.detail} />
                 <div className="mt-1 h-1 rounded-full bg-muted">
-                  <div className="h-1 rounded-full bg-sky-500" style={{ width: `${countdown.progress * 100}%` }} />
+                  <div className="t-meter-fill h-1 rounded-full bg-sky-500" style={{ width: `${countdown.progress * 100}%` }} />
                 </div>
               </div>
             )}
@@ -152,14 +158,18 @@ export function TraderShell({
                 Simulated · no real funds
               </Badge>
               <span className="hidden items-center gap-2 md:flex">
-                <StatusIndicator color={dataLive ? 'emerald' : 'rose'} pulse={dataLive} />
-                <span className="text-muted-foreground">{dataLive ? 'Market data live' : 'Market data stale'}</span>
+                <StatusIndicator color={loading ? 'sky' : dataLive ? 'emerald' : 'rose'} pulse={dataLive} />
+                <SoftText className="text-muted-foreground" text={loading ? 'Checking market data' : dataLive ? 'Market data live' : 'Market data stale'} />
               </span>
-              {solUsd != null && <span className="num hidden text-muted-foreground lg:inline">SOL ${solUsd.toFixed(2)}</span>}
+              {solUsd != null && (
+                <span className="num hidden text-muted-foreground lg:inline">
+                  SOL <SubtleNumber text={`$${solUsd.toFixed(2)}`} value={solUsd} />
+                </span>
+              )}
               <Separator className="h-4 data-[orientation=vertical]:self-center" orientation="vertical" />
               <span className="flex items-center gap-2 font-medium">
                 <StatusIndicator color={status.tone} pulse={status.tone === 'emerald'} />
-                {status.label}
+                <SoftText text={status.label} />
               </span>
             </div>
           </header>
