@@ -3,3 +3,7 @@ web/dist
 data
 reports
 config.local.json
+*.db
+*.db-wal
+*.db-shm
+*.bak

@@ -6,7 +6,7 @@ An autonomous **paper-trading** bot for Solana memecoins, plus a live web dashbo
 
 ## Requirements
 
-- Node.js **22.13+** (tested on 24). It uses Node's built-in SQLite and runs TypeScript directly, with no native modules and no compile step.
+- Node.js **24+**. It uses Node's built-in SQLite and runs TypeScript directly, with no native modules and no compile step.
 - An internet connection, kept up for the full 7 days.
 
 ## Start the seven-day experiment
@@ -14,7 +14,7 @@ An autonomous **paper-trading** bot for Solana memecoins, plus a live web dashbo
 ```bash
 npm install
 npm run build          # build the dashboard once
-npm test               # 26 tests: execution, risk limits, accounting, engine
+npm test               # 29 tests: execution, risk limits, accounting, engine
 npm start              # starts the engine and the dashboard at http://localhost:8787
 ```
 
@@ -36,9 +36,31 @@ Other commands:
 |---|---|
 | `npm run experiment:status` | One-line summary of the current experiment |
 | `npm run report` | Writes an interim (or final) report to `reports/` |
+| `npm run db:export -- <file>` | Consistent snapshot of the database for moving hosts (engine must be stopped) |
 | `npm run experiment:reset` | Moves the database to a `.bak` file so you can start fresh |
 
 When the seven days are up, the engine closes any open positions at simulated, realistic fills and stops trading. It then writes `reports/experiment-<id>-final.md` and `.json`; the dashboard links to the report too.
+
+## Running on Railway
+
+`railway.json` sets everything up: Node 24 (`.node-version`), `npm run build`, then `npm start`, with **one replica**, no deploy overlap, a healthcheck on `/api/health`, and a restart policy of always.
+
+1. Attach a volume to the service, mounted at `/data`. The engine puts its database at `$RAILWAY_VOLUME_MOUNT_PATH/paper-trader.db` and reports in `/data/reports`. On Railway it **refuses to start** without the volume, so it can never write to the container disk, which is wiped on every deploy.
+2. Set the `ADMIN_TOKEN` variable to a long random string. The dashboard is public on Railway, so starting an experiment or importing data needs that token (the dashboard asks for it).
+3. On Railway the server listens on `0.0.0.0:$PORT`. Locally it still listens only on `127.0.0.1`.
+
+**Only one engine trades at a time.** Each engine must hold a lease stored in the database itself, and it renews the lease every tick. A second engine pointed at the same database goes into *Standby* and does nothing. A lease is released on a clean stop, and taken over 90 seconds after a crash. Separate copies of the database cannot see each other, so when you move an experiment, stop the old engine **before** you export it (the export command checks this).
+
+### Moving a running experiment to Railway
+
+```bash
+# 1. Stop the local engine (Ctrl+C in its terminal), then take a consistent snapshot:
+npm run db:export -- paper-trader-export.db
+# 2. Upload it to the deployment (only accepted while the deployment has never had an experiment):
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" --data-binary @paper-trader-export.db https://<your-app>.up.railway.app/api/admin/import
+```
+
+The deployment checks the file's integrity, stages it, restarts, and swaps it in. Nothing is overwritten: an import is refused if the deployment already holds an experiment, and the empty database it replaces is kept as a `.pre-import-*.bak` file. Your local database is never modified. The experiment keeps its original start and end times, so the time it spent being moved shows as a gap on the chart.
 
 ## Restarts and outages
 
@@ -107,6 +129,8 @@ Copy `config.example.json` to `config.local.json` and change any value; anything
 ```
 server/src/
   main.ts          engine and HTTP API (serves the dashboard)
+  lease.ts         single-engine lease
+  dbimport.ts      safe one-time database import
   engine.ts        tick loop: data refresh → exits → risk → entries → equity
   strategy.ts      filters, momentum score, exit rules
   execution.ts     swap simulation (quotes, latency, failures, fees)

@@ -1,4 +1,5 @@
 import type { Config } from './config.ts';
+import { claimLease, releaseLease } from './lease.ts';
 import { SOL_MINT } from './config.ts';
 import type { Store, Position, Experiment } from './db.ts';
 import type { Market } from './feeds/dexscreener.ts';
@@ -21,7 +22,7 @@ export interface Feeds {
   iskPerUsd(): Promise<{ rate: number; asOf: number }>;
 }
 
-export type BotStatus = 'STARTING' | 'RUNNING' | 'PAUSED_STALE_DATA' | 'HALTED_DAILY_LOSS' | 'IDLE_NO_EXPERIMENT' | 'FINISHED';
+export type BotStatus = 'STARTING' | 'RUNNING' | 'PAUSED_STALE_DATA' | 'HALTED_DAILY_LOSS' | 'IDLE_NO_EXPERIMENT' | 'FINISHED' | 'STANDBY';
 
 export function toRaw(amount: number, decimals: number): bigint {
   const [i, f = ''] = amount.toFixed(Math.min(decimals, 20)).split('.');
@@ -54,6 +55,8 @@ export class Engine {
   private pending = new Set<string>();
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
+  /** When set, this engine only trades while it holds the database lease (see lease.ts). */
+  private lease: { owner: string; label: string } | null = null;
 
   constructor(cfg: Config, store: Store, feeds: Feeds, clock: () => number = Date.now, rng: () => number = Math.random) {
     this.cfg = cfg;
@@ -76,6 +79,24 @@ export class Engine {
 
   stop() {
     if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.lease) releaseLease(this.store, this.lease.owner);
+  }
+
+  /** Require the single-engine lease before every tick. */
+  useLease(owner: string, label: string) {
+    this.lease = { owner, label };
+  }
+
+  /** Renew (or try to take) the lease. False means another live engine owns this database. */
+  private holdLease(now: number): boolean {
+    if (!this.lease) return true;
+    const r = claimLease(this.store, this.lease.owner, this.lease.label, now);
+    if (!r.held) {
+      const age = Math.round((now - r.holder.heartbeat) / 1000);
+      this.setStatus('STANDBY', `Another engine (${r.holder.label}, ${r.holder.owner}) holds the trading lease (heartbeat ${age}s ago). This one will not trade.`);
+    }
+    return r.held;
   }
 
   get solIsk(): number | null {
@@ -108,6 +129,7 @@ export class Engine {
     this.busy = true;
     const t0 = Date.now();
     try {
+      if (!this.holdLease(this.clock())) return;
       await this.refreshData();
       await this.trade();
     } catch (e) {

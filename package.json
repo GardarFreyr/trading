@@ -5,13 +5,14 @@
   "type": "module",
   "description": "Autonomous Solana memecoin PAPER-trading bot. Simulation only: no wallet, no keys, no real trades.",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/src/main.ts",
     "experiment:start": "node --disable-warning=ExperimentalWarning server/src/cli.ts start",
     "experiment:status": "node --disable-warning=ExperimentalWarning server/src/cli.ts status",
     "experiment:reset": "node --disable-warning=ExperimentalWarning server/src/cli.ts reset",
+    "db:export": "node --disable-warning=ExperimentalWarning server/src/cli.ts export",
     "report": "node --disable-warning=ExperimentalWarning server/src/cli.ts report",
     "build": "vite build web",
     "dev:web": "vite web",

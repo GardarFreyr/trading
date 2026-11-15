@@ -21,6 +21,7 @@ const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   RUNNING: { label: 'Running', tone: 'emerald' },
   PAUSED_STALE_DATA: { label: 'Paused · stale data', tone: 'amber' },
   HALTED_DAILY_LOSS: { label: 'Halted · daily loss limit', tone: 'rose' },
+  STANDBY: { label: 'Standby · another engine owns this data', tone: 'amber' },
   IDLE_NO_EXPERIMENT: { label: 'Idle', tone: 'sky' },
   FINISHED: { label: 'Finished', tone: 'sky' },
   STARTING: { label: 'Starting', tone: 'sky' },
@@ -76,7 +77,12 @@ export default function App() {
     if (starting || !confirm('Start the seven-day paper-trading experiment with 10,000 simulated ISK?')) return;
     setStarting(true);
     try {
-      const r = await fetch('/api/experiment/start', { method: 'POST' });
+      let r = await fetch('/api/experiment/start', { method: 'POST' });
+      if (r.status === 401) {
+        const token = prompt('Admin token for this deployment:');
+        if (!token) return;
+        r = await fetch('/api/experiment/start', { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+      }
       const j = await r.json();
       if (!r.ok) alert(j.error);
     } finally {

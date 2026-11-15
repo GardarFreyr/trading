@@ -140,8 +140,30 @@ export function loadConfig(): Config {
   if (existsSync(file)) overrides = JSON.parse(readFileSync(file, 'utf8'));
   const cfg = { ...defaultConfig, ...overrides };
   if (process.env.PORT) cfg.port = Number(process.env.PORT);
+  const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
   if (process.env.DB_PATH) cfg.dbPath = process.env.DB_PATH;
+  else if (volume) cfg.dbPath = `${volume.replace(/\/$/, '')}/paper-trader.db`;
+  if (volume && !process.env.REPORTS_DIR) process.env.REPORTS_DIR = `${volume.replace(/\/$/, '')}/reports`;
   return cfg;
+}
+
+/** Where the deployment runs: 'railway' or 'local'. */
+export const onRailway = (): boolean => !!(process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+
+/** Interface to listen on: all interfaces on Railway (behind its proxy), loopback locally. */
+export const listenHost = (): string => process.env.HOST ?? (onRailway() ? '0.0.0.0' : '127.0.0.1');
+
+/**
+ * On Railway the database must live on the persistent volume; the container disk is wiped on every deploy.
+ * Returns an error message if the configured path would lose data, else null.
+ */
+export function storageProblem(dbFile: string): string | null {
+  if (!onRailway()) return null;
+  const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (!volume) return 'Running on Railway without a volume (RAILWAY_VOLUME_MOUNT_PATH is not set). Attach the volume at /data; refusing to run on ephemeral disk.';
+  const root = volume.replace(/\/$/, '') + '/';
+  if (!dbFile.startsWith(root)) return `Database path ${dbFile} is not on the volume ${volume}; refusing to run on ephemeral disk.`;
+  return null;
 }
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';

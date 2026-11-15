@@ -137,7 +137,7 @@ ${r.closedPositions.map((p) => `| ${p.symbol} | ${p.openedAt} | ${p.closedAt} | 
 }
 
 export function writeReport(r: Report, name: string): { json: string; md: string } {
-  const dir = resolve(ROOT, 'reports');
+  const dir = process.env.REPORTS_DIR ?? resolve(ROOT, 'reports');
   mkdirSync(dir, { recursive: true });
   const json = resolve(dir, `${name}.json`);
   const md = resolve(dir, `${name}.md`);

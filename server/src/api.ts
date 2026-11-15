@@ -1,11 +1,54 @@
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, createWriteStream, renameSync, unlinkSync } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { resolve, extname, normalize } from 'node:path';
 import type { Engine } from './engine.ts';
 import { startExperiment } from './engine.ts';
 import { ROOT } from './config.ts';
 import { buildReport, DISCLAIMER } from './report.ts';
 import { maxDrawdown, tradeStats, utcDay } from './accounting.ts';
+import { inspectDb } from './dbimport.ts';
+import { readLease } from './lease.ts';
+
+export interface ApiOptions {
+  host?: string;
+  /** Live database file (used by the one-time import). */
+  dbFile?: string;
+  /** Called after a database has been staged for import; should stop the process so it restarts and applies it. */
+  restart?: () => void;
+}
+
+const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
+
+/** Mutating endpoints need `Authorization: Bearer $ADMIN_TOKEN` when ADMIN_TOKEN is set (always set it on a public deployment). */
+function authorized(req: IncomingMessage): boolean {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) return true;
+  const got = Buffer.from((req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''));
+  const want = Buffer.from(token);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+/** Stream the request body to a file, enforcing a size cap. */
+function saveBody(req: IncomingMessage, file: string): Promise<number> {
+  return new Promise((ok, fail) => {
+    let n = 0;
+    const out = createWriteStream(file);
+    req.on('data', (c: Buffer) => {
+      n += c.length;
+      if (n > MAX_IMPORT_BYTES) {
+        req.destroy();
+        out.destroy();
+        fail(new Error('upload too large'));
+      }
+    });
+    req.on('error', fail);
+    out.on('error', fail);
+    out.on('finish', () => ok(n));
+    req.pipe(out);
+  });
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon',
@@ -29,7 +72,7 @@ export function stateSnapshot(engine: Engine) {
   const base = {
     disclaimer: DISCLAIMER,
     now,
-    bot: { status: engine.status, detail: engine.statusDetail, lastTickAt: engine.lastTickAt, tickMs: engine.tickMs, pollSeconds: cfg.pollSeconds },
+    bot: { status: engine.status, detail: engine.statusDetail, lastTickAt: engine.lastTickAt, tickMs: engine.tickMs, pollSeconds: cfg.pollSeconds, lease: readLease(store) },
     data: {
       healthy: health.healthy,
       problems: health.problems,
@@ -95,7 +138,7 @@ export function stateSnapshot(engine: Engine) {
   };
 }
 
-export function startApi(engine: Engine, port: number) {
+export function startApi(engine: Engine, port: number, opts: ApiOptions = {}) {
   const dist = resolve(ROOT, 'web', 'dist');
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -105,6 +148,35 @@ export function startApi(engine: Engine, port: number) {
     };
     try {
       if (url.pathname === '/api/state') return json(200, stateSnapshot(engine));
+      if (url.pathname === '/api/health') {
+        const exp = engine.store.experiment();
+        return json(200, {
+          ok: true, simulated: true, status: engine.status, detail: engine.statusDetail, lastTickAt: engine.lastTickAt,
+          experiment: exp ? { id: exp.id, status: exp.status, startedAt: exp.startedAt, endsAt: exp.endsAt } : null,
+          lease: readLease(engine.store),
+        });
+      }
+      if (req.method === 'POST' && url.pathname.startsWith('/api/') && !authorized(req)) return json(401, { error: 'admin token required' });
+      if (url.pathname === '/api/admin/import' && req.method === 'POST') {
+        // One-time migration: only into a database that has never held an experiment. Nothing is overwritten or deleted.
+        if (!process.env.ADMIN_TOKEN) return json(403, { error: 'import disabled: set ADMIN_TOKEN first' });
+        if (!opts.dbFile || !opts.restart) return json(501, { error: 'import not available' });
+        if (engine.store.experiment()) return json(409, { error: 'this deployment already has an experiment; refusing to overwrite it' });
+        const tmp = `${opts.dbFile}.upload-${Date.now()}`;
+        try {
+          const bytes = await saveBody(req, tmp);
+          const info = inspectDb(tmp);
+          if (!info.ok) throw new Error(info.error);
+          if (info.experiments === 0) throw new Error('uploaded database holds no experiment');
+          renameSync(tmp, `${opts.dbFile}.import`);
+          json(202, { staged: true, bytes, ...info, next: 'engine restarting to apply the import' });
+          setTimeout(opts.restart, 500);
+          return;
+        } catch (e) {
+          if (existsSync(tmp)) unlinkSync(tmp);
+          return json(400, { error: (e as Error).message });
+        }
+      }
       if (url.pathname === '/api/report') {
         const exp = engine.store.experiment();
         if (!exp) return json(404, { error: 'no experiment' });
@@ -133,6 +205,6 @@ export function startApi(engine: Engine, port: number) {
       json(400, { error: (e as Error).message });
     }
   });
-  server.listen(port, '127.0.0.1');
+  server.listen(port, opts.host ?? '127.0.0.1');
   return server;
 }
