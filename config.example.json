@@ -1,0 +1,21 @@
+{
+  "maxPositionIsk": 700,
+  "maxOpenPositions": 2,
+  "dailyLossLimitIsk": 350,
+  "takeProfitPct": 0.2,
+  "stopLossPct": 0.1,
+  "trailingActivatePct": 0.12,
+  "trailingDistancePct": 0.07,
+  "maxHoldMinutes": 240,
+  "minEntryScore": 65,
+  "minLiquidityUsd": 40000,
+  "minVolume24hUsd": 100000,
+  "maxTop10HolderPct": 50,
+  "maxRoundTripLossPct": 6,
+  "failureProbability": 0.05,
+  "latencySlippageMeanBps": 25,
+  "latencySlippageStdBps": 40,
+  "slippageToleranceBps": 300,
+  "priorityFeeLamports": 200000,
+  "port": 8787
+}
