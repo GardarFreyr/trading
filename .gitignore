@@ -7,3 +7,4 @@ config.local.json
 *.db-wal
 *.db-shm
 *.bak
+.admin-token

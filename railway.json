@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npm start",
+    "startCommand": "node --disable-warning=ExperimentalWarning server/src/main.ts",
     "numReplicas": 1,
     "overlapSeconds": 0,
     "drainingSeconds": 20,

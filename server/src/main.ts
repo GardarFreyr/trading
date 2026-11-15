@@ -52,6 +52,10 @@ const shutdown = (code = 0) => {
   store.close();
   process.exit(code);
 };
-process.on('SIGINT', () => shutdown());
-process.on('SIGTERM', () => shutdown());
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    console.log(`${sig} received: stopping engine and releasing the trading lease`);
+    shutdown();
+  });
+}
 process.on('unhandledRejection', (e) => store.event('error', `Unhandled: ${(e as Error)?.message ?? e}`));
