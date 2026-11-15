@@ -1,4 +1,4 @@
-import { Fragment, useId, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Area, AreaChart, CartesianGrid, Line, XAxis, YAxis } from 'recharts';
 import {
   AlertTriangleIcon,
@@ -20,33 +20,66 @@ import type { Feed, Position, State, Token, Trade } from '../types';
 import { ago, dateTime, duration, isk, pct, price, time, tone, usd } from '../format';
 import { SlidingTabs, SubtleNumber, TextsReveal } from './motion';
 
-const cardCls = 'shadow-none dark:ring-0';
+/** VEXTRA surface: borderless, 18px radius, one step above the page. */
+export const cardCls = 'v-card gap-5 rounded-2xl border-0 bg-card py-6 shadow-none ring-0';
+/** Quiet header rule inside a card. */
+const headRule = 'border-b border-border pb-5 [.border-b]:pb-5';
 type Exp = NonNullable<State['experiment']>;
 
-// ---------- Stats (same anatomy as the block's DashboardStats) ----------
+// ---------- KPI strip: the four primary metrics on one surface ----------
 
 /** `n` is the number behind `value`; it sets which way changed digits move. */
 export type Stat = { label: string; value: string; n: number; delta?: number; footnote: string; valueCls?: string };
 
-export function StatCard({ s }: { s: Stat }) {
+export function KpiStrip({ stats }: { stats: Stat[] }) {
   return (
-    <Card className={cardCls}>
-      <CardHeader>
-        <CardTitle className="text-xs font-normal text-muted-foreground">{s.label}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <p className={cn('text-2xl font-semibold tracking-tight tabular-nums', s.valueCls)}>
-          <SubtleNumber text={s.value} value={s.n} />
-        </p>
-        <div className="flex items-center gap-1 text-xs">
-          {s.delta != null && (
-            <Delta value={s.delta}>
-              <DeltaIcon />
-              <DeltaValue precision={2} />
-            </Delta>
-          )}
-          <span className="text-muted-foreground">{s.footnote}</span>
+    <section
+      aria-label="Key metrics"
+      className="grid grid-cols-2 overflow-hidden rounded-2xl bg-card lg:grid-cols-4 [&>*]:border-border max-lg:[&>*:nth-child(-n+2)]:border-b max-lg:[&>*:nth-child(odd)]:border-r lg:[&>*:not(:last-child)]:border-r"
+    >
+      {stats.map((s) => (
+        <div className="v-cell flex min-w-0 flex-col gap-2 px-4 py-5 sm:px-6 sm:py-6" key={s.label}>
+          <span className="text-xs text-muted-foreground">{s.label}</span>
+          <p className={cn('num truncate text-[22px] leading-tight font-semibold tracking-tight sm:text-[28px]', s.valueCls)}>
+            <SubtleNumber text={s.value} value={s.n} />
+          </p>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+            {s.delta != null && (
+              <Delta value={s.delta}>
+                <DeltaIcon />
+                <DeltaValue precision={2} />
+              </Delta>
+            )}
+            <span className="truncate text-muted-foreground">{s.footnote}</span>
+          </div>
         </div>
+      ))}
+    </section>
+  );
+}
+
+/** Compact list of the secondary metrics, next to the chart. */
+export function SummaryCard({ rows, className }: { rows: (Stat & { hint?: string })[] } & ComponentProps<typeof Card>) {
+  return (
+    <Card className={cn(cardCls, 'gap-0 py-0', className)}>
+      <CardHeader className="px-6 pt-6 pb-3">
+        <CardTitle className="text-[15px] font-medium">Performance summary</CardTitle>
+        <CardDescription>Simulated, after every fee and slippage</CardDescription>
+      </CardHeader>
+      <CardContent className="px-3 pb-3">
+        <dl className="flex flex-col">
+          {rows.map((r) => (
+            <div className="v-row flex items-baseline justify-between gap-4 rounded-xl px-3 py-3" key={r.label}>
+              <dt className="min-w-0">
+                <span className="block text-sm">{r.label}</span>
+                <span className="block truncate text-xs text-muted-foreground">{r.footnote}</span>
+              </dt>
+              <dd className={cn('num shrink-0 text-right text-sm font-medium', r.valueCls)}>
+                <SubtleNumber text={r.value} value={r.n} />
+              </dd>
+            </div>
+          ))}
+        </dl>
       </CardContent>
     </Card>
   );
@@ -71,20 +104,35 @@ export function EquityCard({ e, className, ...props }: { e: Exp } & ComponentPro
     return pts.filter((p) => p.ts >= from);
   }, [e.equity, range]);
   const ret = (e.equityIsk / e.initialIsk - 1) * 100;
+  // Draw the line in on first paint and on a range change, never on the 4 s polls.
+  const [animate, setAnimate] = useState(true);
+  useEffect(() => {
+    setAnimate(true);
+    const t = window.setTimeout(() => setAnimate(false), 900);
+    return () => clearTimeout(t);
+  }, [range]);
+  const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const anim = { isAnimationActive: animate && !reduced, animationDuration: 700, animationEasing: 'ease-out' as const };
   const span = rows.length > 1 ? rows[rows.length - 1].ts - rows[0].ts : 0;
 
   return (
-    <Card className={cn(cardCls, 'md:col-span-2 lg:col-span-3', className)} {...props}>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <Card className={cn(cardCls, 'gap-6', className)} {...props}>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Portfolio performance</CardTitle>
+            <CardTitle className="text-[15px] font-medium">Portfolio performance</CardTitle>
             <Delta value={ret} variant="badge">
               <DeltaIcon variant="trend" />
               <DeltaValue precision={2} />
             </Delta>
           </div>
-          <CardDescription>Simulated equity in ISK after all costs, against buying and holding SOL.</CardDescription>
+          <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>Simulated equity in ISK after all costs</span>
+            <span className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-3 rounded-full bg-[var(--chart-2)]" />Bot</span>
+              <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0 w-3 border-t border-dashed border-[var(--chart-1)]" />Hold SOL</span>
+            </span>
+          </CardDescription>
         </div>
         <SlidingTabs
           className="shrink-0 self-start sm:self-center"
@@ -100,20 +148,20 @@ export function EquityCard({ e, className, ...props }: { e: Exp } & ComponentPro
       </CardHeader>
       <CardContent>
         {rows.length < 2 ? (
-          <div className="flex aspect-22/8 w-full items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+          <div className="flex h-[280px] w-full items-center justify-center rounded-xl bg-surface-2/50 text-sm text-muted-foreground sm:h-[360px] lg:h-[400px]">
             The chart starts after the first minute of the experiment.
           </div>
         ) : (
-          <ChartContainer className="aspect-22/8 w-full" config={equityConfig}>
+          <ChartContainer className="aspect-auto h-[280px] w-full sm:h-[360px] lg:h-[400px]" config={equityConfig}>
             <AreaChart accessibilityLayer data={rows} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
               <defs>
                 <linearGradient id={`eq-${uid}`} x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="var(--color-bot)" stopOpacity={0.45} />
-                  <stop offset="55%" stopColor="var(--color-bot)" stopOpacity={0.12} />
+                  <stop offset="0%" stopColor="var(--color-bot)" stopOpacity={0.28} />
+                  <stop offset="60%" stopColor="var(--color-bot)" stopOpacity={0.06} />
                   <stop offset="100%" stopColor="var(--color-bot)" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid className="stroke-border" vertical={false} />
+              <CartesianGrid stroke="rgb(255 255 255 / 0.05)" vertical={false} />
               <XAxis
                 axisLine={false}
                 dataKey="ts"
@@ -141,7 +189,7 @@ export function EquityCard({ e, className, ...props }: { e: Exp } & ComponentPro
               <ChartTooltip
                 content={
                   <ChartTooltipContent
-                    className="min-w-40"
+                    className="min-w-44 rounded-xl border-0 bg-surface-2 shadow-xl"
                     formatter={(value, name) => (
                       <div className="flex w-full justify-between gap-4">
                         <span className="text-muted-foreground">{equityConfig[name as 'bot' | 'sol']?.label}</span>
@@ -155,10 +203,10 @@ export function EquityCard({ e, className, ...props }: { e: Exp } & ComponentPro
                     }}
                   />
                 }
-                cursor={false}
+                cursor={{ stroke: 'rgb(255 255 255 / 0.12)', strokeWidth: 1 }}
               />
-              <Area dataKey="bot" dot={false} fill={`url(#eq-${uid})`} stroke="var(--color-bot)" strokeWidth={2} type="monotone" />
-              <Line dataKey="sol" dot={false} stroke="var(--color-sol)" strokeDasharray="5 4" strokeWidth={1.5} type="monotone" />
+              <Area {...anim} activeDot={{ r: 4, strokeWidth: 0 }} dataKey="bot" dot={false} fill={`url(#eq-${uid})`} stroke="var(--color-bot)" strokeWidth={2} type="monotone" />
+              <Line {...anim} activeDot={{ r: 3, strokeWidth: 0 }} dataKey="sol" dot={false} stroke="var(--color-sol)" strokeDasharray="4 4" strokeWidth={1.25} type="monotone" />
             </AreaChart>
           </ChartContainer>
         )}
@@ -176,7 +224,7 @@ function Meter({ label, value, max, display, barCls }: { label: string; value: n
         <span className="text-muted-foreground">{label}</span>
         <span className="num">{display}</span>
       </div>
-      <div className="h-1.5 rounded-full bg-muted">
+      <div className="h-1.5 rounded-full bg-surface-2">
         <div className={cn('t-meter-fill h-1.5 rounded-full', barCls)} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
       </div>
     </div>
@@ -186,21 +234,21 @@ function Meter({ label, value, max, display, barCls }: { label: string; value: n
 export function RiskCard({ e, cfg, className }: { e: Exp; cfg: State['config'] } & ComponentProps<typeof Card>) {
   const lossHit = e.dailyLossUsedIsk >= cfg.dailyLossLimitIsk;
   return (
-    <Card className={cn(cardCls, className)}>
-      <CardHeader className="border-b">
-        <CardTitle>Risk limits</CardTitle>
+    <Card className={cn(cardCls, 'v-hover', className)}>
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Risk limits</CardTitle>
         <CardDescription>Hard limits enforced by the engine</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <Meter
-          barCls={lossHit ? 'bg-red-500' : 'bg-amber-500'}
+          barCls={lossHit ? 'bg-down' : 'bg-[var(--chart-3)]'}
           display={`${Math.round(e.dailyLossUsedIsk)} / ${cfg.dailyLossLimitIsk} ISK`}
           label="Daily loss used"
           max={cfg.dailyLossLimitIsk}
           value={e.dailyLossUsedIsk}
         />
         <Meter
-          barCls="bg-sky-500"
+          barCls="bg-primary"
           display={`${e.openPositions.length} / ${cfg.maxOpenPositions}`}
           label="Open positions"
           max={cfg.maxOpenPositions}
@@ -244,9 +292,9 @@ export function RiskCard({ e, cfg, className }: { e: Exp; cfg: State['config'] }
 
 export function PositionsCard({ e, cfg, now, className }: { e: Exp; cfg: State['config']; now: number } & ComponentProps<typeof Card>) {
   return (
-    <Card className={cn(cardCls, 'gap-0 md:col-span-2', className)} id="positions">
-      <CardHeader className="border-b">
-        <CardTitle>Active positions</CardTitle>
+    <Card className={cn(cardCls, 'gap-0', className)} id="positions">
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Active positions</CardTitle>
         <CardDescription>
           {e.openPositions.length} of {cfg.maxOpenPositions} slots in use · up to {isk(cfg.maxPositionIsk)} each
         </CardDescription>
@@ -255,7 +303,7 @@ export function PositionsCard({ e, cfg, now, className }: { e: Exp; cfg: State['
         {e.openPositions.length === 0 ? (
           <p className="px-6 py-10 text-center text-sm text-muted-foreground">No open positions. The bot is scanning for entries.</p>
         ) : (
-          <ul className="flex flex-col divide-y">
+          <ul className="flex flex-col gap-1 py-3">
             {e.openPositions.map((p) => (
               <PositionRow cfg={cfg} key={p.id} now={now} p={p} />
             ))}
@@ -272,7 +320,7 @@ function PositionRow({ p, cfg, now }: { p: Position; cfg: State['config']; now: 
   const sl = cfg.stopLossPct;
   const at = Math.max(0, Math.min(1, (chg / 100 + sl) / (tp + sl)));
   return (
-    <li className="flex flex-col gap-3 px-6 py-4">
+    <li className="v-row mx-3 flex flex-col gap-3 rounded-xl px-3 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="font-medium">{p.symbol}</span>
@@ -295,8 +343,8 @@ function PositionRow({ p, cfg, now }: { p: Position; cfg: State['config']; now: 
         <span>Held {duration(now - p.openedAt)}</span>
       </div>
       <div>
-        <div className="relative h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-muted to-emerald-500/40">
-          <div className="t-marker absolute -top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-background bg-foreground" style={{ left: `${at * 100}%` }} />
+        <div className="relative h-1.5 rounded-full bg-gradient-to-r from-down/45 via-surface-2 to-up/45">
+          <div className="t-marker absolute -top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-card bg-foreground" style={{ left: `${at * 100}%` }} />
         </div>
         <div className="num mt-1 flex justify-between text-[10px] text-muted-foreground">
           <span>SL −{sl * 100}%</span>
@@ -323,18 +371,18 @@ const FEED_LABEL: Record<string, string> = {
 
 export function FeedsCard({ s, now, className }: { s: State; now: number } & ComponentProps<typeof Card>) {
   return (
-    <Card className={cn(cardCls, className)} id="feeds">
-      <CardHeader className="border-b">
-        <CardTitle>Data feed health</CardTitle>
+    <Card className={cn(cardCls, 'gap-0 v-hover', className)} id="feeds">
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Data feed health</CardTitle>
         <CardDescription>{s.data.healthy ? 'All required feeds are fresh' : `Trading paused: ${s.data.problems.join('; ')}`}</CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
-        <ul className="flex flex-col divide-y">
+      <CardContent className="px-3 py-3">
+        <ul className="flex flex-col">
           {s.data.feeds.map((f: Feed) => {
             const ok = !!f.lastOk && (!f.lastErrorAt || f.lastOk > f.lastErrorAt);
             const recentErr = ok && f.errCount > 0 && !!f.lastErrorAt && now - f.lastErrorAt < 600_000;
             return (
-              <li className="flex items-center gap-3 px-6 py-3" key={f.feed}>
+              <li className="v-row flex items-center gap-3 rounded-xl px-3 py-3" key={f.feed}>
                 <StatusIndicator color={!ok ? 'rose' : recentErr ? 'amber' : 'emerald'} pulse={ok && !recentErr} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{FEED_LABEL[f.feed] ?? f.feed}</p>
@@ -349,7 +397,7 @@ export function FeedsCard({ s, now, className }: { s: State; now: number } & Com
               </li>
             );
           })}
-          <li className="num flex justify-between px-6 py-3 text-xs text-muted-foreground">
+          <li className="num mt-1 flex justify-between border-t border-border px-3 pt-4 pb-2 text-xs text-muted-foreground">
             <span>Engine tick</span>
             <span>
               {ago(s.bot.lastTickAt, now)} · {s.bot.tickMs}ms
@@ -377,15 +425,15 @@ export function ActivityCard({ s, now, className }: { s: State; now: number } & 
   if (baseline.current == null) baseline.current = s.events[0]?.id ?? 0;
   return (
     <Card className={cn(cardCls, 'gap-0', className)}>
-      <CardHeader className="border-b">
-        <CardTitle>Bot activity</CardTitle>
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Bot activity</CardTitle>
         <CardDescription>Decisions, skips and status changes</CardDescription>
       </CardHeader>
-      <CardContent className="max-h-[480px] overflow-y-auto px-0">
-        <ul className="flex flex-col divide-y">
+      <CardContent className="max-h-[480px] overflow-y-auto px-3 py-3">
+        <ul className="flex flex-col">
           {s.events.slice(0, 25).map((ev) => (
-            <li className="flex items-center gap-3 px-3 py-3" key={ev.id}>
-              <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center [&_svg]:size-4">
+            <li className="v-row flex items-center gap-3 rounded-xl px-2 py-2.5" key={ev.id}>
+              <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 [&_svg]:size-4">
                 {eventIcon(ev.level, ev.message)}
               </span>
               {ev.id > baseline.current! ? (
@@ -419,9 +467,9 @@ export function ActivityCard({ s, now, className }: { s: State; now: number } & 
 export function TransactionsCard({ trades, className }: { trades: Trade[] } & ComponentProps<typeof Card>) {
   const [open, setOpen] = useState<number | null>(null);
   return (
-    <Card className={cn(cardCls, 'gap-0 sm:col-span-2 lg:col-span-4', className)} id="transactions">
-      <CardHeader className="border-b">
-        <CardTitle>Recent transactions</CardTitle>
+    <Card className={cn(cardCls, 'gap-0 pb-2', className)} id="transactions">
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Recent transactions</CardTitle>
         <CardDescription>Every row is a simulated execution priced from a live quote. Select a row for its assumptions.</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -463,7 +511,7 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
                         <TableCell className="num pl-6 text-muted-foreground">{dateTime(t.ts)}</TableCell>
                         <TableCell className="font-medium">{t.symbol}</TableCell>
                         <TableCell>
-                          <span className={cn('text-sm font-medium', t.side === 'BUY' ? 'text-emerald-500' : 'text-sky-500')}>{t.side}</span>
+                          <span className={cn('text-sm font-medium', t.side === 'BUY' ? 'text-up' : 'text-muted-foreground')}>{t.side}</span>
                         </TableCell>
                         <TableCell className="num text-right">{failed ? '—' : Math.round(Math.abs(t.iskAmount)).toLocaleString('en-US')}</TableCell>
                         <TableCell className="num text-right text-muted-foreground">{t.slippageVsMarkBps == null ? '—' : `${t.slippageVsMarkBps.toFixed(0)} bps`}</TableCell>
@@ -487,7 +535,7 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
                           <div className="t-acc" data-open={open === t.id}>
                             <div className="t-acc-panel">
                               <div className="t-acc-panel-inner">
-                                <div className="border-b bg-muted/40 px-6 py-4">
+                                <div className="bg-surface-2/60 px-6 py-4">
                             <p className="mb-2 text-sm">{failed ? `Failed: ${t.failReason}` : t.reason}</p>
                             <div className="num grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-6 gap-y-1 text-xs text-muted-foreground">
                               <span>Quote: {t.quoteSource} ({t.route})</span>
@@ -526,9 +574,9 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
 
 export function CompletedCard({ e, className }: { e: Exp } & ComponentProps<typeof Card>) {
   return (
-    <Card className={cn(cardCls, 'gap-0 sm:col-span-2 lg:col-span-4', className)} id="completed">
-      <CardHeader className="border-b">
-        <CardTitle>Completed trades</CardTitle>
+    <Card className={cn(cardCls, 'gap-0 pb-2', className)} id="completed">
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Completed trades</CardTitle>
         <CardDescription>
           {e.stats.completed} closed · avg win {isk(e.stats.avgWinIsk)} · avg loss {isk(e.stats.avgLossIsk)} · net after every fee and slippage
         </CardDescription>
@@ -564,7 +612,7 @@ export function CompletedCard({ e, className }: { e: Exp } & ComponentProps<type
                         <span className="line-clamp-1 text-sm text-muted-foreground">{p.exitReason}</span>
                       </TableCell>
                       <TableCell className="pr-6 text-right">
-                        <Badge className={win ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'} variant="secondary">
+                        <Badge className={win ? 'border-0 bg-up/10 text-up' : 'border-0 bg-down/10 text-down'} variant="secondary">
                           {win ? 'Win' : 'Loss'}
                         </Badge>
                       </TableCell>
@@ -587,9 +635,9 @@ export function TokensCard({ tokens, min, className }: { tokens: Token[]; min: n
   const others = tokens.filter((t) => t.status !== 'watching');
   const rows = [...watching, ...others];
   return (
-    <Card className={cn(cardCls, 'gap-0 sm:col-span-2 lg:col-span-4', className)} id="tokens">
-      <CardHeader className="border-b">
-        <CardTitle>Monitored tokens</CardTitle>
+    <Card className={cn(cardCls, 'gap-0 pb-2', className)} id="tokens">
+      <CardHeader className={headRule}>
+        <CardTitle className="text-[15px] font-medium">Monitored tokens</CardTitle>
         <CardDescription>
           {watching.length} pass the filters · {others.length} filtered out · entry needs a score of {min} or more and 5 minutes of observations
         </CardDescription>
@@ -625,7 +673,7 @@ export function TokensCard({ tokens, min, className }: { tokens: Token[]; min: n
                     <TableCell className="num text-right text-muted-foreground">{usd(t.liquidityUsd)}</TableCell>
                     <TableCell className="num hidden text-right text-muted-foreground sm:table-cell">{usd(t.volume24h)}</TableCell>
                     <TableCell className={cn('num text-right', tone(t.change1h))}>{pct(t.change1h, 1)}</TableCell>
-                    <TableCell className={cn('num text-right', ready ? 'font-semibold text-emerald-500' : 'text-muted-foreground')}>
+                    <TableCell className={cn('num text-right', ready ? 'font-semibold text-up' : 'text-muted-foreground')}>
                       {ok ? (t.score ?? '—') : '—'}
                     </TableCell>
                     <TableCell className="hidden max-w-[440px] lg:table-cell">

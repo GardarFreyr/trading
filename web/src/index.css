@@ -40,38 +40,45 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* VEXTRA visual system (dark only). */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0b0d10;
+  --foreground: #f5f5f7;
+  --card: #15181d;
+  --card-foreground: #f5f5f7;
+  --popover: #15181d;
+  --popover-foreground: #f5f5f7;
+  --primary: #00d49a;
+  --primary-foreground: #04110c;
+  --secondary: #1c2026;
+  --secondary-foreground: #f5f5f7;
+  --muted: #1c2026;
+  --muted-foreground: #8b9099;
+  --accent: #1c2026;
+  --accent-foreground: #f5f5f7;
+  --destructive: #f0616d;
+  --border: rgb(255 255 255 / 0.06);
+  --input: rgb(255 255 255 / 0.08);
+  --ring: rgb(0 212 154 / 0.55);
+  --chart-1: #8b9099;
+  --chart-2: #00d49a;
+  --chart-3: #e8b04b;
+  --chart-4: #9a8cff;
+  --chart-5: #f0616d;
+  --sidebar: #101215;
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #00d49a;
+  --sidebar-primary-foreground: #04110c;
+  --sidebar-accent: #191c21;
+  --sidebar-accent-foreground: #f5f5f7;
+  --sidebar-border: rgb(255 255 255 / 0.04);
+  --sidebar-ring: rgb(0 212 154 / 0.55);
+  /* Elevation and semantic tones */
+  --surface-hover: #191d23;
+  --surface-2: #1c2026;
+  --up: #00d49a;
+  --down: #f0616d;
+  --radius: 0.875rem; /* 14px; cards use radius-xl = 18px */
 }
 
 @theme inline {
@@ -112,6 +119,19 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-2: var(--surface-2);
+  --color-emerald-400: #2ee0ae;
+  --color-emerald-500: #00d49a;
+  --color-emerald-600: #00b383;
+  --color-rose-400: #f37a84;
+  --color-rose-500: #f0616d;
+  --color-rose-600: #d94f5b;
+  --color-red-400: #f37a84;
+  --color-red-500: #f0616d;
+  --color-red-600: #d94f5b;
 }
 
 @layer base {
@@ -119,4 +139,6 @@
   body { @apply bg-background text-foreground antialiased; font-family: var(--font-sans); }
 }
 
-.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* Figures: Inter with tabular numerals, so columns of numbers line up without a monospace look. */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "cv11" 1; }
+body { font-feature-settings: "cv11" 1, "ss01" 1; }
