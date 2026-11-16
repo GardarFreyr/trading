@@ -197,9 +197,18 @@ function CandleChart({ candles, tf, levels, markers, unit, onReady, viewKey, foc
       if (i1 > i0) chart.timeScale().setVisibleLogicalRange({ from: i0 - 0.5, to: i1 + 2.5 });
       else chart.timeScale().fitContent();
     };
-    frame();
-    const raf = requestAnimationFrame(frame);
-    const settle = window.setTimeout(frame, 450);
+    // The panel slides in, so the first measured width is not final: re-frame on every
+    // size change (and once the slide has finished) until the viewer takes over.
+    let raf = 0;
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (el.clientWidth > 0) frame();
+      });
+    };
+    const ro = new ResizeObserver(schedule);
+    ro.observe(el);
+    const settle = window.setTimeout(schedule, 500);
 
     const byTime = new Map(candles.map((c) => [local(c.time) as number, c]));
     const setLegend = (c: Candle | undefined) => {
@@ -219,6 +228,7 @@ function CandleChart({ candles, tf, levels, markers, unit, onReady, viewKey, foc
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(settle);
+      ro.disconnect();
       el.removeEventListener('pointerdown', touch);
       el.removeEventListener('wheel', touch);
       el.removeEventListener('touchstart', touch);
