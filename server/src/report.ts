@@ -4,6 +4,7 @@ import type { Config } from './config.ts';
 import { ROOT } from './config.ts';
 import type { Store } from './db.ts';
 import { maxDrawdown, tradeStats } from './accounting.ts';
+import { rulesFor } from './risk.ts';
 
 export const DISCLAIMER =
   'SIMULATED PAPER-TRADING RESULTS. No real funds, wallet or orders were used. Fills are modelled from live Jupiter quotes ' +
@@ -11,7 +12,8 @@ export const DISCLAIMER =
   'quote and fill, tax/accounting effects) can be materially worse. Past simulated performance does not predict real results.';
 
 export function buildReport(store: Store, expId: number, now: number, cfg: Config) {
-  const exp = store.experiment()!;
+  const exp = store.experimentById(expId)!;
+  const rules = rulesFor(exp, cfg);
   const eq = store.equity(expId);
   const last = eq[eq.length - 1];
   const closed = store.closedPositions(expId);
@@ -41,7 +43,9 @@ export function buildReport(store: Store, expId: number, now: number, cfg: Confi
     experimentId: expId,
     status: exp.status,
     generatedAt: new Date(now).toISOString(),
-    period: { start: new Date(exp.startedAt).toISOString(), end: new Date(exp.endsAt).toISOString() },
+    kind: exp.kind,
+    period: { start: new Date(exp.startedAt).toISOString(), end: rules.endsAt != null ? new Date(rules.endsAt).toISOString() : exp.finishedAt ? new Date(exp.finishedAt).toISOString() : 'open-ended (continuous)' },
+    haltReason: exp.haltReason,
     initialIsk: exp.initialIsk,
     finalEquityIsk: finalEquity,
     netPnlIsk: finalEquity - exp.initialIsk,
@@ -66,7 +70,8 @@ export function buildReport(store: Store, expId: number, now: number, cfg: Confi
       maxOpenPositions: cfg.maxOpenPositions,
       takeProfitPct: cfg.takeProfitPct * 100,
       stopLossPct: cfg.stopLossPct * 100,
-      dailyLossLimitIsk: cfg.dailyLossLimitIsk,
+      dailyLossLimitIsk: rules.dailyLossLimitIsk ?? 'none (daily P/L recorded, no halt)',
+      maxDrawdownHalt: rules.maxDrawdownPct != null ? `${(rules.maxDrawdownPct * 100).toFixed(0)}% below peak equity` : 'none',
       failureProbability: cfg.failureProbability,
       latencySlippage: `mean ${cfg.latencySlippageMeanBps} bps, sd ${cfg.latencySlippageStdBps} bps`,
       slippageToleranceBps: cfg.slippageToleranceBps,
@@ -92,11 +97,11 @@ export function reportMarkdown(r: Report): string {
       : r.excessVsSolPct > 0 && r.netPnlIsk > 0
         ? 'The strategy beat holding SOL after all simulated costs in this window. Treat as a hypothesis, not proof.'
         : 'The strategy did not beat holding SOL after all simulated costs in this window.';
-  return `# Seven-day paper-trading report — experiment #${r.experimentId}
+  return `# ${r.kind === 'continuous' ? 'Continuous' : 'Seven-day'} paper-trading report — experiment #${r.experimentId}
 
 > **${r.disclaimer}**
 
-Period: ${r.period.start} → ${r.period.end} (status: ${r.status})
+Period: ${r.period.start} → ${r.period.end} (status: ${r.status})${r.haltReason ? `\n\n**${r.haltReason}**` : ''}
 
 | Metric | Value |
 |---|---|
@@ -146,8 +151,8 @@ export function writeReport(r: Report, name: string): { json: string; md: string
   return { json, md };
 }
 
-export function finalizeExperiment(store: Store, expId: number, now: number, cfg: Config) {
-  store.updateExperiment(expId, { status: 'finished', finishedAt: now });
+export function finalizeExperiment(store: Store, expId: number, now: number, cfg: Config, status: 'finished' | 'halted' = 'finished') {
+  store.updateExperiment(expId, { status, finishedAt: now });
   const r = buildReport(store, expId, now, cfg);
   store.updateExperiment(expId, { reportJson: JSON.stringify(r) });
   if (!process.env.NO_REPORT_FILES) writeReport(r, `experiment-${expId}-final`);

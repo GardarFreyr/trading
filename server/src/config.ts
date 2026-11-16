@@ -14,6 +14,8 @@ export interface Config {
   maxPositionIsk: number;
   maxOpenPositions: number;
   dailyLossLimitIsk: number;
+  /** Continuous experiments only: halt and liquidate once equity is this far below its peak (0.2 = 20%). */
+  continuousMaxDrawdownPct: number;
   reentryCooldownMinutes: number;
 
   // Exits
@@ -83,6 +85,7 @@ export const defaultConfig: Config = {
   maxPositionIsk: 700,
   maxOpenPositions: 2,
   dailyLossLimitIsk: 350,
+  continuousMaxDrawdownPct: 0.2,
   reentryCooldownMinutes: 120,
 
   takeProfitPct: 0.2,

@@ -74,9 +74,21 @@ export interface Trade {
   assumptions: string;
 }
 
+export interface ExperimentSummary {
+  id: number;
+  kind: 'seven_day' | 'continuous';
+  status: 'running' | 'finished' | 'halted';
+  startedAt: number;
+  endsAt: number | null;
+  finishedAt: number | null;
+  initialIsk: number;
+  botStatus: string;
+}
+
 export interface State {
   disclaimer: string;
   now: number;
+  experiments: ExperimentSummary[];
   bot: { status: string; detail: string; lastTickAt: number; tickMs: number; pollSeconds: number };
   data: { healthy: boolean; problems: string[]; solUsd: number | null; iskPerUsd: number | null; fxAsOf: number; feeds: Feed[] };
   config: {
@@ -84,7 +96,10 @@ export interface State {
     maxOpenPositions: number;
     takeProfitPct: number;
     stopLossPct: number;
-    dailyLossLimitIsk: number;
+    /** null = the selected experiment has no daily loss halt (daily P/L is still recorded). */
+    dailyLossLimitIsk: number | null;
+    /** null = no total-drawdown halt for the selected experiment. Fraction (0.2 = 20%). */
+    maxDrawdownPct: number | null;
     trailingActivatePct: number | null;
     trailingDistancePct: number;
     maxHoldMinutes: number;
@@ -95,9 +110,16 @@ export interface State {
   events: { id: number; ts: number; level: string; message: string }[];
   experiment: null | {
     id: number;
-    status: 'running' | 'finished';
+    kind: 'seven_day' | 'continuous';
+    status: 'running' | 'finished' | 'halted';
     startedAt: number;
-    endsAt: number;
+    /** null = continuous (no end date). */
+    endsAt: number | null;
+    finishedAt: number | null;
+    haltedAt: number | null;
+    haltReason: string | null;
+    peakEquityIsk: number;
+    currentDrawdownPct: number;
     initialIsk: number;
     cashIsk: number;
     equityIsk: number;

@@ -21,6 +21,8 @@ const imported = applyPendingImport(dbFile);
 if (imported) console.log(imported);
 
 const store = new Store(dbFile);
+if (store.migrated.length)
+  store.event('info', `Database schema extended (added ${store.migrated.join(', ')}); existing rows unchanged${store.migrationBackup ? `. Backup copy taken first: ${store.migrationBackup}` : ''}`);
 if (imported) store.event(imported.startsWith('Imported') ? 'info' : 'error', imported);
 
 const label = onRailway() ? `railway:${process.env.RAILWAY_ENVIRONMENT_NAME ?? 'env'}` : 'local';
@@ -31,13 +33,13 @@ const host = listenHost();
 const server = startApi(engine, cfg.port, { host, dbFile, restart: () => shutdown(75) });
 engine.start();
 
-const exp = store.experiment();
+const exps = store.experiments().filter((e) => e.status === 'running');
 const lease = readLease(store);
 console.log(`
   Solana Paper Trader — SIMULATION ONLY (no wallet, no keys, no real trades)
   Listening:  http://${host}:${cfg.port}  (${label})
   Database:   ${dbFile}
-  Experiment: ${exp ? `#${exp.id} ${exp.status}, ends ${new Date(exp.endsAt).toISOString()}` : 'none yet'}
+  Running:    ${exps.length ? exps.map((e) => `#${e.id} ${e.kind}${e.kind === 'seven_day' ? ` ends ${new Date(e.endsAt).toISOString()}` : ''}`).join(' · ') : 'none'}
   Engine id:  ${owner}${lease && lease.owner !== owner ? `  (lease currently held by ${lease.owner})` : ''}
   Stop with Ctrl+C. State is persisted; restarting resumes the experiment.
 `);

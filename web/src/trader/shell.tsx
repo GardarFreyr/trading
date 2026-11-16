@@ -86,6 +86,7 @@ export function TraderShell({
   countdown,
   experimentId,
   hasReport,
+  reportHref = '/api/report',
   canStart,
   onStart,
   loading = false,
@@ -95,9 +96,10 @@ export function TraderShell({
   status: { label: string; tone: StatusTone };
   dataLive: boolean;
   solUsd: number | null;
-  countdown: { label: string; detail: string; progress: number; msLeft: number } | null;
+  countdown: { label: string; detail: string; progress: number | null; msLeft: number } | null;
   experimentId: number | null;
   hasReport: boolean;
+  reportHref?: string;
   canStart: boolean;
   onStart: () => void;
   /** No state from the engine yet: hide controls that depend on it. */
@@ -143,16 +145,18 @@ export function TraderShell({
               <p className="num text-[13px] font-medium">
                 <SubtleNumber text={countdown.label} value={countdown.msLeft} />
               </p>
-              <div className="h-1 overflow-hidden rounded-full bg-surface-2">
-                <div className="t-meter-fill h-1 rounded-full bg-primary" style={{ width: `${countdown.progress * 100}%` }} />
-              </div>
+              {countdown.progress != null && (
+                <div className="h-1 overflow-hidden rounded-full bg-surface-2">
+                  <div className="t-meter-fill h-1 rounded-full bg-primary" style={{ width: `${countdown.progress * 100}%` }} />
+                </div>
+              )}
               <SoftText className="text-[11px] text-muted-foreground" text={countdown.detail} />
             </div>
           )}
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="text-muted-foreground" size="sm" tooltip="Report">
-                <a href="/api/report" rel="noreferrer" target="_blank">
+                <a href={reportHref} rel="noreferrer" target="_blank">
                   <FileTextIcon />
                   <span>{hasReport ? 'Final report' : 'Interim report (JSON)'}</span>
                 </a>

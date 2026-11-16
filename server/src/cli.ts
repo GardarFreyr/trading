@@ -43,13 +43,14 @@ async function main() {
   }
   const store = new Store(dbFile);
   if (cmd === 'start') {
-    const id = await startExperiment(store, cfg, liveFeeds(cfg));
-    const e = store.experiment()!;
-    console.log(`Experiment #${id} started: ${e.initialIsk} ISK, ends ${new Date(e.endsAt).toString()}`);
+    const kind = process.argv[3] === 'continuous' ? 'continuous' : 'seven_day';
+    const id = await startExperiment(store, cfg, liveFeeds(cfg), Date.now(), kind);
+    const e = store.experimentById(id)!;
+    console.log(`Experiment #${id} (${kind}) started: ${e.initialIsk} ISK${kind === 'continuous' ? ', no end date' : `, ends ${new Date(e.endsAt).toString()}`}`);
     console.log('Keep `npm start` running for the full seven days (the engine picks this up within one tick).');
   } else if (cmd === 'status' || cmd === 'report') {
-    const e = store.experiment();
-    if (!e) return console.log('No experiment yet. Run `npm run experiment:start`.');
+    const e = process.argv[3] ? store.experimentById(Number(process.argv[3])) : store.experiment();
+    if (!e) return console.log('No such experiment. Run `npm run experiment:start`.');
     const r = buildReport(store, e.id, Date.now(), cfg);
     if (cmd === 'report') {
       const files = writeReport(r, e.status === 'finished' ? `experiment-${e.id}-final` : `experiment-${e.id}-interim`);
@@ -60,7 +61,7 @@ async function main() {
         `${r.trades.completed} trades · win ${(r.trades.winRate * 100).toFixed(0)}% · costs ${r.costs.totalIsk.toFixed(0)} ISK`,
     );
   } else {
-    console.log('Usage: cli.ts start | status | report | reset | export [file]');
+    console.log('Usage: cli.ts start [continuous] | status [id] | report [id] | reset | export [file]');
   }
   store.close();
 }

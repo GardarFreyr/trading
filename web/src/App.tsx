@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { State } from './types';
+import type { ExperimentSummary, State } from './types';
 import { duration, isk, pct } from './format';
 import { TraderShell, type StatusTone } from './trader/shell';
 import {
@@ -26,6 +26,7 @@ const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   RUNNING: { label: 'Running', tone: 'emerald' },
   PAUSED_STALE_DATA: { label: 'Paused · stale data', tone: 'amber' },
   HALTED_DAILY_LOSS: { label: 'Halted · daily loss limit', tone: 'rose' },
+  HALTED_DRAWDOWN: { label: 'Halted · 20% drawdown safety halt', tone: 'rose' },
   STANDBY: { label: 'Standby · another engine owns this data', tone: 'amber' },
   IDLE_NO_EXPERIMENT: { label: 'Idle', tone: 'sky' },
   FINISHED: { label: 'Finished', tone: 'sky' },
@@ -52,6 +53,20 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [starting, setStarting] = useState(false);
   const [chartId, setChartId] = useState<number | null>(null);
+  // Which experiment the dashboard shows (?exp=<id>); null = the engine's default (oldest running).
+  const [selected, setSelected] = useState<number | null>(() => {
+    const v = Number(new URLSearchParams(window.location.search).get('exp'));
+    return Number.isInteger(v) && v > 0 ? v : null;
+  });
+  const selectedRef = useRef(selected);
+  const choose = (id: number) => {
+    selectedRef.current = id;
+    setSelected(id);
+    setChartId(null);
+    const u = new URL(window.location.href);
+    u.searchParams.set('exp', String(id));
+    window.history.replaceState(null, '', u);
+  };
   const hash = useHash();
   const toasts = useTradeToasts(s);
   // Skeleton (transitions.dev 14): pulses until the first state arrives, then cross-fades
@@ -68,10 +83,11 @@ export default function App() {
     let alive = true;
     const load = async () => {
       try {
-        const r = await fetch('/api/state', { cache: 'no-store' });
+        const want = selectedRef.current;
+        const r = await fetch(want == null ? '/api/state' : `/api/state?experiment=${want}`, { cache: 'no-store' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = (await r.json()) as State;
-        if (alive) {
+        if (alive && selectedRef.current === want) {
           setS(j);
           setErr(null);
         }
@@ -80,6 +96,7 @@ export default function App() {
       }
     };
     load();
+    loadNow.current = load;
     const a = setInterval(load, 4000);
     const b = setInterval(() => setNow(Date.now()), 1000);
     return () => {
@@ -89,18 +106,30 @@ export default function App() {
     };
   }, []);
 
-  const start = async () => {
-    if (starting || !confirm('Start the seven-day paper-trading experiment with 10,000 simulated ISK?')) return;
+  const loadNow = useRef<() => void>(() => {});
+  useEffect(() => {
+    selectedRef.current = selected;
+    loadNow.current();
+  }, [selected]);
+
+  const start = async (kind: 'seven_day' | 'continuous' = 'seven_day') => {
+    const msg =
+      kind === 'continuous'
+        ? 'Start a separate CONTINUOUS paper-trading experiment with its own 10,000 simulated ISK?\n\nNo end date and no daily loss halt; it stops itself permanently at a 20% drawdown from peak equity. The seven-day experiment is not affected.'
+        : 'Start the seven-day paper-trading experiment with 10,000 simulated ISK?';
+    if (starting || !confirm(msg)) return;
     setStarting(true);
     try {
-      let r = await fetch('/api/experiment/start', { method: 'POST' });
+      const url = `/api/experiment/start?kind=${kind}`;
+      let r = await fetch(url, { method: 'POST' });
       if (r.status === 401) {
         const token = prompt('Admin token for this deployment:');
         if (!token) return;
-        r = await fetch('/api/experiment/start', { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+        r = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
       }
       const j = await r.json();
       if (!r.ok) alert(j.error);
+      else choose(j.id);
     } finally {
       setStarting(false);
     }
@@ -113,15 +142,20 @@ export default function App() {
     : engineAlive
       ? (STATUS[s.bot.status] ?? { label: s.bot.status, tone: 'sky' as const })
       : { label: 'Engine not responding', tone: 'rose' as const };
+  const continuous = e?.kind === 'continuous';
   const countdown = e
-    ? e.status === 'finished'
-      ? { label: 'Complete', detail: 'Seven days finished', progress: 1, msLeft: 0 }
-      : {
-          label: `${duration(e.endsAt - now)} left`,
-          detail: `Day ${Math.min(7, Math.floor((now - e.startedAt) / 86_400_000) + 1)} of 7`,
-          progress: Math.min(1, (now - e.startedAt) / (e.endsAt - e.startedAt)),
-          msLeft: e.endsAt - now,
-        }
+    ? e.status === 'halted'
+      ? { label: 'Halted', detail: '20% drawdown safety halt', progress: null, msLeft: 0 }
+      : e.status === 'finished'
+        ? { label: 'Complete', detail: 'Seven days finished', progress: 1, msLeft: 0 }
+        : e.endsAt == null
+          ? { label: `Running ${duration(now - e.startedAt)}`, detail: `Continuous · day ${Math.floor((now - e.startedAt) / 86_400_000) + 1}`, progress: null, msLeft: now - e.startedAt }
+          : {
+              label: `${duration(e.endsAt - now)} left`,
+              detail: `Day ${Math.min(7, Math.floor((now - e.startedAt) / 86_400_000) + 1)} of 7`,
+              progress: Math.min(1, (now - e.startedAt) / (e.endsAt - e.startedAt)),
+              msLeft: e.endsAt - now,
+            }
     : null;
 
   let kpis: Stat[] = [];
@@ -140,9 +174,23 @@ export default function App() {
       { label: 'Trading costs', value: isk(costs), n: costs, footnote: `fees ${Math.round(e.costs.feesIsk)} · slippage ${Math.round(e.costs.slippageIsk)}` },
     ];
     summary = [
-      { label: 'Today net P/L', value: isk(e.dailyPnlIsk, true), n: e.dailyPnlIsk, valueCls: pnlCls(e.dailyPnlIsk), footnote: `${pct(todayPct)} · limit −${s.config.dailyLossLimitIsk} ISK` },
+      {
+        label: 'Today net P/L',
+        value: isk(e.dailyPnlIsk, true),
+        n: e.dailyPnlIsk,
+        valueCls: pnlCls(e.dailyPnlIsk),
+        footnote: `${pct(todayPct)} · ${s.config.dailyLossLimitIsk != null ? `limit −${s.config.dailyLossLimitIsk} ISK` : 'no daily halt'}`,
+      },
       { label: 'vs. holding SOL', value: pct(vsSol), n: vsSol, valueCls: pnlCls(vsSol), footnote: `SOL hold return ${pct(solRet)}` },
-      { label: 'Max drawdown', value: pct(-e.drawdown.pct * 100), n: -e.drawdown.pct, footnote: `${isk(e.drawdown.isk)} from peak` },
+      {
+        label: 'Max drawdown',
+        value: pct(-e.drawdown.pct * 100),
+        n: -e.drawdown.pct,
+        footnote:
+          s.config.maxDrawdownPct != null
+            ? `now ${e.currentDrawdownPct.toFixed(1)}% · halt at ${Math.round(s.config.maxDrawdownPct * 100)}%`
+            : `${isk(e.drawdown.isk)} from peak`,
+      },
       { label: 'Cash available', value: isk(e.cashIsk), n: e.cashIsk, footnote: `${isk(e.positionsIsk)} in positions` },
       { label: 'Open positions', value: `${e.openPositions.length} / ${s.config.maxOpenPositions}`, n: e.openPositions.length, footnote: `up to ${isk(s.config.maxPositionIsk)} each` },
       { label: 'Failed transactions', value: `${e.costs.failed}`, n: e.costs.failed, footnote: `of ${e.costs.failed + e.costs.filled} simulated` },
@@ -160,7 +208,8 @@ export default function App() {
       experimentId={e?.id ?? null}
       hasReport={!!e?.hasFinalReport}
       loading={!s}
-      onStart={start}
+      onStart={() => start('seven_day')}
+      reportHref={e ? `/api/report?experiment=${e.id}` : '/api/report'}
       pathname={hash}
       solUsd={s?.data.solUsd ?? null}
       status={status}
@@ -170,6 +219,15 @@ export default function App() {
         <div className="t-skel-content flex flex-col gap-6 md:gap-8">
           {s && (
             <>
+              {s.experiments.length > 0 && (
+                <ExperimentSwitcher
+                  canStart={s.data.healthy && !starting}
+                  current={e?.id ?? selected}
+                  experiments={s.experiments}
+                  onSelect={choose}
+                  onStartContinuous={() => start('continuous')}
+                />
+              )}
               <section aria-label="Experiment summary" className={cn('relative isolate shrink-0 overflow-hidden rounded-2xl bg-card', reveal(0))} id="overview">
                 <img alt="" className="absolute inset-0 -z-10 size-full object-cover object-[center_68%] opacity-50" decoding="async" src="/banner.webp" />
                 <div className="absolute inset-0 -z-10 bg-gradient-to-r from-card via-card/75 to-card/10" />
@@ -182,9 +240,11 @@ export default function App() {
                         <span className="text-amber-300">Paper trading</span>
                         {e ? ` · Experiment #${e.id}${countdown ? ` · ${countdown.detail}` : ''}` : ' · No experiment running'}
                       </p>,
-                      <h1 className="mt-2 text-2xl font-semibold tracking-tight text-balance sm:text-[32px]">Overview</h1>,
+                      <h1 className="mt-2 text-2xl font-semibold tracking-tight text-balance sm:text-[32px]">{continuous ? 'Continuous experiment' : 'Overview'}</h1>,
                       <p className="mt-1.5 max-w-md text-sm text-pretty text-muted-foreground">
-                        Seven-day forward test of a Solana memecoin strategy with 10,000 simulated ISK. No real funds or wallets.
+                        {continuous
+                          ? 'Open-ended forward test with its own 10,000 simulated ISK. No daily loss halt; stops permanently at a 20% drawdown. No real funds or wallets.'
+                          : 'Seven-day forward test of a Solana memecoin strategy with 10,000 simulated ISK. No real funds or wallets.'}
                       </p>,
                     ]}
                   />
@@ -239,7 +299,7 @@ export default function App() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <Button disabled={!s.data.healthy || starting} onClick={start}>
+                      <Button disabled={!s.data.healthy || starting} onClick={() => start('seven_day')}>
                         {starting ? 'Starting…' : s.data.healthy ? 'Start 7-day experiment' : 'Waiting for live data…'}
                       </Button>
                     </CardContent>
@@ -271,6 +331,62 @@ export default function App() {
         positionId={chartId}
       />
     </TraderShell>
+  );
+}
+
+const KIND_LABEL = { seven_day: 'Seven-day', continuous: 'Continuous' } as const;
+
+/** Tabs for the separate experiments. Each one has its own cash, positions and history. */
+function ExperimentSwitcher({
+  experiments,
+  current,
+  onSelect,
+  onStartContinuous,
+  canStart,
+}: {
+  experiments: ExperimentSummary[];
+  current: number | null;
+  onSelect: (id: number) => void;
+  onStartContinuous: () => void;
+  canStart: boolean;
+}) {
+  const showStart = !experiments.some((x) => x.kind === 'continuous' && x.status === 'running');
+  return (
+    <nav aria-label="Experiments" className="-mb-2 flex flex-wrap items-center gap-2">
+      {experiments.map((x) => {
+        const active = x.id === current;
+        const st = x.status === 'running' ? (STATUS[x.botStatus]?.label ?? x.botStatus) : x.status === 'halted' ? 'Halted' : 'Finished';
+        const dot = x.status !== 'running' ? 'bg-muted-foreground' : x.botStatus === 'RUNNING' ? 'bg-emerald-500' : x.botStatus.startsWith('HALTED') ? 'bg-rose-500' : 'bg-amber-400';
+        return (
+          <button
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'v-hover flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs transition-colors',
+              active ? 'bg-card text-foreground ring-1 ring-border' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
+            )}
+            key={x.id}
+            onClick={() => onSelect(x.id)}
+            type="button"
+          >
+            <span aria-hidden className={cn('size-1.5 rounded-full', dot)} />
+            <span className="font-medium">
+              {KIND_LABEL[x.kind]} #{x.id}
+            </span>
+            <span className="hidden text-muted-foreground sm:inline">· {st.split(' · ')[0]}</span>
+          </button>
+        );
+      })}
+      {showStart && (
+        <button
+          className="rounded-full px-3.5 py-1.5 text-xs text-primary transition-colors hover:bg-card/60 disabled:opacity-50"
+          disabled={!canStart}
+          onClick={onStartContinuous}
+          type="button"
+        >
+          + Start continuous experiment
+        </button>
+      )}
+    </nav>
   );
 }
 
@@ -307,11 +423,18 @@ function PageSkeleton({ message }: { message: string | null }) {
 /** Toast (transitions.dev 22) for each simulated execution that lands while the page is open. */
 function useTradeToasts(s: State | null) {
   const seen = useRef<number | null>(null);
+  const expRef = useRef<number | null>(null);
   const [items, setItems] = useState<ToastItem[]>([]);
   useEffect(() => {
     const trades = s?.experiment?.trades;
     if (!trades) return;
     const maxId = trades.reduce((m, t) => Math.max(m, t.id), 0);
+    // Switching experiments shows another history: never toast it.
+    if (expRef.current !== s!.experiment!.id) {
+      expRef.current = s!.experiment!.id;
+      seen.current = maxId;
+      return;
+    }
     if (seen.current == null) {
       seen.current = maxId; // existing history never toasts
       return;

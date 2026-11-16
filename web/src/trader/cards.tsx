@@ -233,21 +233,43 @@ function Meter({ label, value, max, display, barCls }: { label: string; value: n
 }
 
 export function RiskCard({ e, cfg, className }: { e: Exp; cfg: State['config'] } & ComponentProps<typeof Card>) {
-  const lossHit = e.dailyLossUsedIsk >= cfg.dailyLossLimitIsk;
+  const limit = cfg.dailyLossLimitIsk;
+  const lossHit = limit != null && e.dailyLossUsedIsk >= limit;
+  const ddMax = cfg.maxDrawdownPct;
   return (
     <Card className={cn(cardCls, 'v-hover', className)}>
       <CardHeader className={headRule}>
         <CardTitle className="text-[15px] font-medium">Risk limits</CardTitle>
-        <CardDescription>Hard limits enforced by the engine</CardDescription>
+        <CardDescription>
+          Hard limits enforced by the engine for experiment #{e.id}
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <Meter
-          barCls={lossHit ? 'bg-down' : 'bg-[var(--chart-3)]'}
-          display={`${Math.round(e.dailyLossUsedIsk)} / ${cfg.dailyLossLimitIsk} ISK`}
-          label="Daily loss used"
-          max={cfg.dailyLossLimitIsk}
-          value={e.dailyLossUsedIsk}
-        />
+        {limit != null ? (
+          <Meter
+            barCls={lossHit ? 'bg-down' : 'bg-[var(--chart-3)]'}
+            display={`${Math.round(e.dailyLossUsedIsk)} / ${limit} ISK`}
+            label="Daily loss used"
+            max={limit}
+            value={e.dailyLossUsedIsk}
+          />
+        ) : (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Daily loss today</span>
+            <span className="num">
+              {Math.round(e.dailyLossUsedIsk)} ISK <span className="text-muted-foreground">· recorded, no daily halt</span>
+            </span>
+          </div>
+        )}
+        {ddMax != null && (
+          <Meter
+            barCls={e.currentDrawdownPct / 100 >= ddMax * 0.75 ? 'bg-down' : 'bg-[var(--chart-4)]'}
+            display={`${e.currentDrawdownPct.toFixed(1)}% / ${Math.round(ddMax * 100)}%`}
+            label="Drawdown from peak (halt)"
+            max={ddMax}
+            value={e.currentDrawdownPct / 100}
+          />
+        )}
         <Meter
           barCls="bg-primary"
           display={`${e.openPositions.length} / ${cfg.maxOpenPositions}`}
@@ -258,8 +280,8 @@ export function RiskCard({ e, cfg, className }: { e: Exp; cfg: State['config'] }
         <Meter
           barCls="bg-[var(--chart-4)]"
           display={pct(-e.drawdown.pct * 100)}
-          label="Max drawdown"
-          max={0.2}
+          label="Max drawdown (recorded)"
+          max={ddMax ?? 0.2}
           value={e.drawdown.pct}
         />
         <dl className="num grid grid-cols-2 gap-x-3 gap-y-2 text-xs">

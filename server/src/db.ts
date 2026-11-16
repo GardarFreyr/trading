@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export interface Experiment {
@@ -8,12 +8,36 @@ export interface Experiment {
   endsAt: number;
   initialIsk: number;
   cashIsk: number;
-  status: 'running' | 'finished';
+  /** 'halted' = stopped permanently by the drawdown safety halt (continuous experiments only). */
+  status: 'running' | 'finished' | 'halted';
   solUsdStart: number;
   iskPerUsdStart: number;
   finishedAt: number | null;
   reportJson: string | null;
+  /** 'seven_day' (the original fixed-window experiment) or 'continuous' (no end date). */
+  kind: ExperimentKind;
+  /** Total-portfolio drawdown (peak-to-current, mark-to-market) that halts the experiment. NULL = no such halt. */
+  maxDrawdownPct: number | null;
+  /** Highest mark-to-market equity seen so far (tracked for the drawdown halt). */
+  peakEquityIsk: number | null;
+  haltedAt: number | null;
+  haltReason: string | null;
 }
+
+export type ExperimentKind = 'seven_day' | 'continuous';
+
+/** Continuous experiments have no end; this far-future sentinel keeps the NOT NULL column valid and any date maths harmless. */
+export const NO_END = Date.UTC(9999, 11, 31);
+
+/** Columns added after experiment #1 started. ADD COLUMN only: existing rows keep every value, new columns get these defaults. */
+const MIGRATIONS: { table: string; column: string; ddl: string }[] = [
+  { table: 'experiment', column: 'kind', ddl: "kind TEXT NOT NULL DEFAULT 'seven_day'" },
+  { table: 'experiment', column: 'maxDrawdownPct', ddl: 'maxDrawdownPct REAL' },
+  { table: 'experiment', column: 'peakEquityIsk', ddl: 'peakEquityIsk REAL' },
+  { table: 'experiment', column: 'haltedAt', ddl: 'haltedAt INTEGER' },
+  { table: 'experiment', column: 'haltReason', ddl: 'haltReason TEXT' },
+  { table: 'events', column: 'experimentId', ddl: 'experimentId INTEGER' },
+];
 
 export interface Position {
   id: number;
@@ -147,7 +171,27 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     this.db.exec(SCHEMA);
+    this.migrate(path);
   }
+
+  /** Add any missing columns. Takes a full backup copy first (file databases only); never rewrites or deletes rows. */
+  private migrate(path: string) {
+    const has = (table: string, col: string) => this.all<{ name: string }>(`PRAGMA table_info(${table})`).some((c) => c.name === col);
+    const todo = MIGRATIONS.filter((m) => !has(m.table, m.column));
+    if (!todo.length) return;
+    const hasData = (this.get<{ n: number }>('SELECT COUNT(*) n FROM experiment')?.n ?? 0) > 0;
+    if (path !== ':memory:' && hasData) {
+      const backup = `${path}.pre-migration-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`;
+      if (!existsSync(backup)) this.db.prepare('VACUUM INTO ?').run(backup);
+      this.migrationBackup = backup;
+    }
+    this.tx(() => {
+      for (const m of todo) this.db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.ddl}`);
+    });
+    this.migrated = todo.map((m) => `${m.table}.${m.column}`);
+  }
+  migrated: string[] = [];
+  migrationBackup: string | null = null;
 
   /** Atomic unit of work: either every write lands or none does (crash-safe). */
   tx<T>(fn: () => T): T {
@@ -185,10 +229,23 @@ export class Store {
   }
 
   // Experiment
+  /** The default experiment to show: the oldest one still running, else the most recent. */
   experiment(): Experiment | undefined {
-    return this.get<Experiment>('SELECT * FROM experiment ORDER BY id DESC LIMIT 1');
+    return (
+      this.get<Experiment>("SELECT * FROM experiment WHERE status='running' ORDER BY id LIMIT 1") ??
+      this.get<Experiment>('SELECT * FROM experiment ORDER BY id DESC LIMIT 1')
+    );
   }
-  createExperiment(e: Omit<Experiment, 'id' | 'finishedAt' | 'reportJson'>): number {
+  experimentById(id: number): Experiment | undefined {
+    return this.get<Experiment>('SELECT * FROM experiment WHERE id=?', id);
+  }
+  experiments(): Experiment[] {
+    return this.all<Experiment>('SELECT * FROM experiment ORDER BY id');
+  }
+  runningExperiments(): Experiment[] {
+    return this.all<Experiment>("SELECT * FROM experiment WHERE status='running' ORDER BY id");
+  }
+  createExperiment(e: Omit<Experiment, 'id' | 'finishedAt' | 'reportJson' | 'peakEquityIsk' | 'haltedAt' | 'haltReason'>): number {
     return this.insert('experiment', e as unknown as Row);
   }
   updateExperiment(id: number, patch: Partial<Experiment>) {
@@ -207,6 +264,11 @@ export class Store {
   }
   updatePosition(id: number, patch: Partial<Position>) {
     this.update('positions', 'id', id, patch as Row);
+  }
+
+  /** When this experiment last closed a position in this token (re-entry cooldown is per experiment). */
+  lastExitAt(expId: number, address: string): number | null {
+    return this.get<{ t: number | null }>("SELECT MAX(closedAt) t FROM positions WHERE experimentId=? AND tokenAddress=? AND status='closed'", expId, address)?.t ?? null;
   }
 
   // Trades
@@ -278,11 +340,14 @@ export class Store {
   }
 
   // Events / health / kv
-  event(level: 'info' | 'warn' | 'error' | 'trade', message: string, ts = Date.now()) {
-    this.run('INSERT INTO events (ts, level, message) VALUES (?,?,?)', ts, level, message);
+  event(level: 'info' | 'warn' | 'error' | 'trade', message: string, ts = Date.now(), experimentId: number | null = null) {
+    this.run('INSERT INTO events (ts, level, message, experimentId) VALUES (?,?,?,?)', ts, level, message, experimentId);
   }
-  events(limit = 50) {
-    return this.all<{ id: number; ts: number; level: string; message: string }>('SELECT * FROM events ORDER BY id DESC LIMIT ?', limit);
+  /** Engine-wide events plus, when given, one experiment's own events (other experiments' events are left out). */
+  events(limit = 50, expId?: number, since = 0) {
+    type Ev = { id: number; ts: number; level: string; message: string; experimentId: number | null };
+    if (expId == null) return this.all<Ev>('SELECT * FROM events ORDER BY id DESC LIMIT ?', limit);
+    return this.all<Ev>('SELECT * FROM events WHERE (experimentId IS NULL AND ts>=?) OR experimentId=? ORDER BY id DESC LIMIT ?', since, expId, limit);
   }
   healthOk(feed: string, latencyMs: number, ts = Date.now()) {
     this.run(
