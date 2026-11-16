@@ -4,6 +4,7 @@ import {
   AlertTriangleIcon,
   ArrowDownRightIcon,
   ArrowUpRightIcon,
+  CandlestickChartIcon,
   ChevronDownIcon,
   CircleDotIcon,
   InfoIcon,
@@ -290,7 +291,7 @@ export function RiskCard({ e, cfg, className }: { e: Exp; cfg: State['config'] }
 
 // ---------- Active positions ----------
 
-export function PositionsCard({ e, cfg, now, className }: { e: Exp; cfg: State['config']; now: number } & ComponentProps<typeof Card>) {
+export function PositionsCard({ e, cfg, now, className, onOpenChart }: { e: Exp; cfg: State['config']; now: number; onOpenChart?: (id: number) => void } & ComponentProps<typeof Card>) {
   return (
     <Card className={cn(cardCls, 'gap-0', className)} id="positions">
       <CardHeader className={headRule}>
@@ -305,7 +306,7 @@ export function PositionsCard({ e, cfg, now, className }: { e: Exp; cfg: State['
         ) : (
           <ul className="flex flex-col gap-1 py-3">
             {e.openPositions.map((p) => (
-              <PositionRow cfg={cfg} key={p.id} now={now} p={p} />
+              <PositionRow cfg={cfg} key={p.id} now={now} onOpenChart={onOpenChart} p={p} />
             ))}
           </ul>
         )}
@@ -314,13 +315,25 @@ export function PositionsCard({ e, cfg, now, className }: { e: Exp; cfg: State['
   );
 }
 
-function PositionRow({ p, cfg, now }: { p: Position; cfg: State['config']; now: number }) {
+function PositionRow({ p, cfg, now, onOpenChart }: { p: Position; cfg: State['config']; now: number; onOpenChart?: (id: number) => void }) {
   const chg = p.changePct ?? 0;
   const tp = cfg.takeProfitPct;
   const sl = cfg.stopLossPct;
   const at = Math.max(0, Math.min(1, (chg / 100 + sl) / (tp + sl)));
   return (
-    <li className="v-row mx-3 flex flex-col gap-3 rounded-xl px-3 py-4">
+    <li
+      aria-label={`Open ${p.symbol} chart and trade details`}
+      className="v-row v-click mx-3 flex cursor-pointer flex-col gap-3 rounded-xl px-3 py-4 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      onClick={() => onOpenChart?.(p.id)}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onOpenChart?.(p.id);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="font-medium">{p.symbol}</span>
@@ -329,6 +342,9 @@ function PositionRow({ p, cfg, now }: { p: Position; cfg: State['config']; now: 
             <DeltaValue />
           </Delta>
           {!p.markFresh && <Badge variant="outline">stale price</Badge>}
+          <span className="v-chart-hint hidden items-center gap-1 text-[11px] text-muted-foreground sm:inline-flex">
+            <CandlestickChartIcon className="size-3.5" /> Chart
+          </span>
         </div>
         <span className={cn('num text-sm font-medium', tone(p.unrealizedIsk))}>
           <SubtleNumber text={isk(p.unrealizedIsk, true)} value={p.unrealizedIsk ?? 0} /> net
@@ -572,13 +588,13 @@ export function TransactionsCard({ trades, className }: { trades: Trade[] } & Co
 
 // ---------- Completed trades ----------
 
-export function CompletedCard({ e, className }: { e: Exp } & ComponentProps<typeof Card>) {
+export function CompletedCard({ e, className, onOpenChart }: { e: Exp; onOpenChart?: (id: number) => void } & ComponentProps<typeof Card>) {
   return (
     <Card className={cn(cardCls, 'gap-0 pb-2', className)} id="completed">
       <CardHeader className={headRule}>
         <CardTitle className="text-[15px] font-medium">Completed trades</CardTitle>
         <CardDescription>
-          {e.stats.completed} closed · avg win {isk(e.stats.avgWinIsk)} · avg loss {isk(e.stats.avgLossIsk)} · net after every fee and slippage
+          Select a trade for its price chart · {e.stats.completed} closed · avg win {isk(e.stats.avgWinIsk)} · avg loss {isk(e.stats.avgLossIsk)} · net after every fee and slippage
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
@@ -602,7 +618,19 @@ export function CompletedCard({ e, className }: { e: Exp } & ComponentProps<type
                 {e.closedPositions.map((p) => {
                   const win = (p.netPnlIsk ?? 0) > 0;
                   return (
-                    <TableRow className="h-14 hover:bg-transparent" key={p.id}>
+                    <TableRow
+                      aria-label={`Open ${p.symbol} chart and trade details`}
+                      className="h-14 cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
+                      key={p.id}
+                      onClick={() => onOpenChart?.(p.id)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === 'Enter' || ev.key === ' ') {
+                          ev.preventDefault();
+                          onOpenChart?.(p.id);
+                        }
+                      }}
+                      tabIndex={0}
+                    >
                       <TableCell className="pl-6 font-medium">{p.symbol}</TableCell>
                       <TableCell className="num text-muted-foreground">{dateTime(p.openedAt)}</TableCell>
                       <TableCell className="num text-muted-foreground">{p.closedAt ? duration(p.closedAt - p.openedAt) : '—'}</TableCell>

@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Shimmer, SubtleNumber, TextsReveal, ToastStack, type ToastItem } from './trader/motion';
 import { cn } from '@/lib/utils';
+import { TradeDetailSheet } from './trader/trade-chart';
 
 const STATUS: Record<string, { label: string; tone: StatusTone }> = {
   RUNNING: { label: 'Running', tone: 'emerald' },
@@ -50,6 +51,7 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [starting, setStarting] = useState(false);
+  const [chartId, setChartId] = useState<number | null>(null);
   const hash = useHash();
   const toasts = useTradeToasts(s);
   // Skeleton (transitions.dev 14): pulses until the first state arrives, then cross-fades
@@ -217,10 +219,10 @@ export default function App() {
                   <div className="grid grid-cols-1 gap-6 md:gap-8 lg:grid-cols-12">
                     <EquityCard className={cn('lg:col-span-8', reveal(2))} e={e} />
                     <SummaryCard className={cn('lg:col-span-4', reveal(3))} rows={summary} />
-                    <PositionsCard cfg={s.config} className={cn('lg:col-span-8', reveal(4))} e={e} now={now} />
+                    <PositionsCard cfg={s.config} className={cn('lg:col-span-8', reveal(4))} e={e} now={now} onOpenChart={setChartId} />
                     <RiskCard cfg={s.config} className={cn('lg:col-span-4', reveal(5))} e={e} />
                     <TransactionsCard className={cn('lg:col-span-12', reveal(6))} trades={e.trades} />
-                    <CompletedCard className="lg:col-span-12" e={e} />
+                    <CompletedCard className="lg:col-span-12" e={e} onOpenChart={setChartId} />
                     <ActivityCard className="lg:col-span-6" now={now} s={s} />
                     <FeedsCard className="lg:col-span-6" now={now} s={s} />
                     <TokensCard className="lg:col-span-12" min={s.config.minEntryScore} tokens={s.tokens} />
@@ -257,6 +259,17 @@ export default function App() {
         </div>
       </div>
       <ToastStack items={toasts.items} onDone={toasts.dismiss} />
+      <TradeDetailSheet
+        live={(() => {
+          const op = e?.openPositions.find((x) => x.id === chartId);
+          return op
+            ? { markSol: op.markSol ?? null, markFresh: !!op.markFresh, unrealizedIsk: op.unrealizedIsk ?? null, changePct: op.changePct ?? null, solUsd: s?.data.solUsd ?? null }
+            : null;
+        })()}
+        now={now}
+        onClose={() => setChartId(null)}
+        positionId={chartId}
+      />
     </TraderShell>
   );
 }

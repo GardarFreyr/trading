@@ -10,6 +10,7 @@ import { buildReport, DISCLAIMER } from './report.ts';
 import { maxDrawdown, tradeStats, utcDay } from './accounting.ts';
 import { inspectDb } from './dbimport.ts';
 import { readLease } from './lease.ts';
+import { ChartError, positionChart } from './candles.ts';
 
 export interface ApiOptions {
   host?: string;
@@ -186,6 +187,16 @@ export function startApi(engine: Engine, port: number, opts: ApiOptions = {}) {
         const id = await startExperiment(engine.store, engine.cfg, engine.feeds, engine.clock());
         void engine.tick();
         return json(200, { id });
+      }
+      // Read-only market history for one position's chart. Never trades.
+      const chartMatch = req.method === 'GET' ? /^\/api\/positions\/(\d+)\/chart$/.exec(url.pathname) : null;
+      if (chartMatch) {
+        try {
+          return json(200, await positionChart(engine.store, engine.cfg, Number(chartMatch[1]), url.searchParams.get('tf')));
+        } catch (e) {
+          if (e instanceof ChartError) return json(e.status, { error: e.message, retryAfter: e.retryAfter ?? null });
+          throw e;
+        }
       }
       if (url.pathname.startsWith('/api/')) return json(404, { error: 'not found' });
 

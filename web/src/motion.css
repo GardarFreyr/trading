@@ -522,3 +522,8 @@
   .v-hover, .v-cell, .v-row { transition: none; }
   .v-reveal { animation: none; }
 }
+
+/* Clickable rows reveal a quiet "Chart" hint on hover. */
+.v-chart-hint { opacity: 0; transition: opacity var(--duration-fast) var(--ease-smooth-out); }
+@media (hover: hover) { .v-click:hover .v-chart-hint, .v-click:focus-visible .v-chart-hint { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .v-chart-hint { transition: none; } }
